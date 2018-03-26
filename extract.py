@@ -1,5 +1,5 @@
 # Use like:
-# python extract.py -b 28 -d 2011 2012 2013 -c digits symbols -t 20
+# python extract.py -b 64 -d 2011 2012 2013 -c digits all -t 20
 
 import os
 import argparse
@@ -7,10 +7,10 @@ import argparse
 import xml.etree.ElementTree as ET
 import numpy as np
 import cv2
-# One-hot encoder/decoder
-import one_hot
 # Load / dump data
 import pickle
+
+from scipy import misc
 
 data_dir = os.path.join('data', 'CROHME_full_v2')
 # Construct the argument parse and parse the arguments
@@ -209,10 +209,25 @@ def convert_to_img(trace_group):
         raise Exception('Some sides are > box_size.')
     return image
 
-damaged = 0
-# Extract TRAINING data
-train = []
-for training_inkml in training_inkmls:
+def save_png(d, path):
+    for key in d.keys():
+        img = d[key]
+        if self.monochrome:
+            img = cv2.bitwise_not(d[key])
+            img = cv2.threshold(img, self.trsh, 255,
+                cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+
+        misc.imsave(self.path+'/images/%s.png' % key, img)
+
+# Dump extracted data
+outputs_dir = 'outputs'
+# Make directories if needed
+if not os.path.exists(outputs_dir):
+    os.mkdir(outputs_dir)
+
+damaged, i = 0, 0
+# Extract ALL data
+for training_inkml in all_inkml_files:
     print(training_inkml)
     trace_groups = extract_trace_grps(training_inkml)
     for trace_grp in trace_groups:
@@ -225,75 +240,14 @@ for training_inkml in training_inkmls:
                 classes.append(label)
             # Convert patterns to images
             image = convert_to_img(trace_grp)
-            # Flatten image & construct pattern object
-            pattern = {'features': image.flatten(), 'label': label}
-            train.append(pattern)
+            misc.imsave(outputs_dir+'/%s.png' % (label+'_%i'%i), image)
+            i += 1
         except Exception as e:
             print(e)
             # Ignore damaged trace groups
             damaged += 1
 
-# Extract TESTING data
-test = []
-for testing_inkml in testing_inkmls:
-    print(testing_inkml)
-    trace_groups = extract_trace_grps(testing_inkml)
-    for trace_grp in trace_groups:
-        label = trace_grp['label']
-        # Extract only classes selected by user (selecting categories)
-        if label not in classes_to_extract:
-            continue
-        try:
-            if label not in classes:
-                classes.append(label)
-            # Convert patterns to images
-            image = convert_to_img(trace_grp)
-            # Flatten image & construct pattern object
-            pattern = {'features': image.flatten(), 'label': label}
-            test.append(pattern)
-        except Exception as e:
-            print(e)
-            # Ignore damaged trace groups
-            damaged += 1
 
 # Sort classes alphabetically
 classes = sorted(classes)
-print('\nTraining set size:', len(train))
-print('Testing set size:', len(test))
 print('How many rejected trace groups:', damaged, '\n')
-
-# Data POST-processing
-# 1. Normalize features
-# 2. Convert labels to one-hot format
-for pat in train:
-    pat['features'] = (pat['features'] / 255).astype(dtype=np.uint8)
-    pat['label'] = one_hot.encode(pat['label'], classes)
-for pat in test:
-    pat['features'] = (pat['features'] / 255).astype(dtype=np.uint8)
-    pat['label'] = one_hot.encode(pat['label'], classes)
-
-# Dump extracted data
-outputs_dir = 'outputs'
-train_out_dir = os.path.join(outputs_dir, 'train')
-test_out_dir = os.path.join(outputs_dir, 'test')
-# Make directories if needed
-if not os.path.exists(outputs_dir):
-    os.mkdir(outputs_dir)
-if not os.path.exists(train_out_dir):
-    os.mkdir(train_out_dir)
-if not os.path.exists(test_out_dir):
-    os.mkdir(test_out_dir)
-
-with open(os.path.join(train_out_dir, 'train.pickle'), 'wb') as f:
-    pickle.dump(train, f, protocol=pickle.HIGHEST_PROTOCOL)
-    print('Training data has been successfully dumped into', f.name)
-with open(os.path.join(test_out_dir, 'test.pickle'), 'wb') as f:
-    pickle.dump(test, f, protocol=pickle.HIGHEST_PROTOCOL)
-    print('Testing data has been successfully dumped into', f.name)
-# Save all labels in 'classes.txt' file
-with open('classes.txt', 'w') as f:
-    for r_class in classes:
-        f.write(r_class + '\n')
-    print('All classes that were extracted are listed in {} file.'.format(f.name))
-
-print('\n# Like our facebook page @ https://www.facebook.com/mathocr/')
